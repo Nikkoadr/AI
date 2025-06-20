@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Absensi Wajah</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.20.0/dist/face-api.min.js"></script>
+
+    <style>
+      body {
+        background-color: #f8f9fa;
+      }
+
+      #video-wrapper {
+        position: relative;
+        width: 640px;
+        height: 480px;
+        margin: auto;
+      }
+
+      video,
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 640px;
+        height: 480px;
+        border-radius: 10px;
+        border: 2px solid #0d6efd;
+      }
+
+      #label-container {
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        padding: 8px;
+        font-size: 14px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        text-align: center;
+      }
+
+      #absensi-log {
+        max-height: 200px;
+        overflow-y: auto;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container py-4">
+      <h2 class="text-center mb-4">📸 Absensi Wajah</h2>
+
+      <div class="row justify-content-center">
+        <div id="video-wrapper">
+          <video id="video" autoplay muted playsinline></video>
+        </div>
+      </div>
+
+      <div class="row justify-content-center mt-4">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header bg-primary text-white">📋 Log Absensi</div>
+            <div class="card-body" id="absensi-log"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const MODEL_URL = "/model/";
+      const absensiTercatat = {};
+      let model;
+
+      async function init() {
+        await faceapi.nets.tinyFaceDetector.loadFromUri("/models/");
+        model = await tmImage.load(
+          MODEL_URL + "model.json",
+          MODEL_URL + "metadata.json"
+        );
+
+        const video = document.getElementById("video");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        video.srcObject = stream;
+
+        video.addEventListener("loadeddata", () => {
+          const canvas = faceapi.createCanvasFromMedia(video);
+          canvas.id = "overlay";
+          document.getElementById("video-wrapper").appendChild(canvas);
+
+          const displaySize = {
+            width: video.videoWidth,
+            height: video.videoHeight,
+          };
+          faceapi.matchDimensions(canvas, displaySize);
+
+          setInterval(async () => {
+            const detections = await faceapi.detectAllFaces(
+              video,
+              new faceapi.TinyFaceDetectorOptions({
+                inputSize: 320,
+                scoreThreshold: 0.5,
+              })
+            );
+
+            const resized = faceapi.resizeResults(detections, displaySize);
+            const context = canvas.getContext("2d");
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            faceapi.draw.drawDetections(canvas, resized);
+
+            if (resized.length > 0) {
+              const box = resized[0].box;
+              const faceCanvas = document.createElement("canvas");
+              faceCanvas.width = box.width;
+              faceCanvas.height = box.height;
+
+              faceCanvas
+                .getContext("2d")
+                .drawImage(
+                  video,
+                  box.x,
+                  box.y,
+                  box.width,
+                  box.height,
+                  0,
+                  0,
+                  box.width,
+                  box.height
+                );
+
+              const prediction = await model.predict(faceCanvas);
+
+              const best = prediction.reduce((a, b) =>
+                a.probability > b.probability ? a : b
+              );
+
+              if (best.probability > 0.5) {
+                // tampilkan hanya nama di BAWAH kotak deteksi
+                const labelText = best.className;
+                context.font = "16px Arial";
+                context.fillStyle = "rgba(0,0,0,0.6)";
+
+                const textWidth = context.measureText(labelText).width;
+                const textHeight = 20;
+
+                // Background hitam transparan di bawah kotak wajah
+                context.fillRect(
+                  box.x,
+                  box.y + box.height + 4,
+                  textWidth + 8,
+                  textHeight
+                );
+
+                // Teks putih
+                context.fillStyle = "white";
+                context.fillText(labelText, box.x + 4, box.y + box.height + 18);
+              }
+
+              // absensi hanya jika belum dicatat
+              if (best.probability > 0.95 && !absensiTercatat[best.className]) {
+                absensiTercatat[best.className] = true;
+                const now = new Date().toLocaleTimeString();
+                tampilkanAbsensi(best.className, now);
+                kirimKeServer(best.className, now);
+              }
+            }
+          }, 1000);
+        });
+      }
+
+      function tampilkanAbsensi(name, time) {
+        const div = document.createElement("div");
+        div.textContent = `✅ ${name} hadir pada ${time}`;
+        document.getElementById("absensi-log").appendChild(div);
+      }
+
+      async function kirimKeServer(name, time) {
+        await fetch("/absen", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, time }),
+        });
+      }
+
+      init();
+    </script>
+  </body>
+</html>
