@@ -34,16 +34,6 @@
         border: 2px solid #0d6efd;
       }
 
-      #label-container {
-        background: rgba(0, 0, 0, 0.7);
-        color: #fff;
-        padding: 8px;
-        font-size: 14px;
-        border-radius: 4px;
-        margin-bottom: 10px;
-        text-align: center;
-      }
-
       #absensi-log {
         max-height: 200px;
         overflow-y: auto;
@@ -73,7 +63,8 @@
     </div>
 
     <script>
-      const MODEL_URL = "/model/";
+      const MODEL_URL =
+        "https://teachablemachine.withgoogle.com/models/ou71hKEkp/";
       const absensiTercatat = {};
       let model;
 
@@ -117,32 +108,35 @@
 
             if (resized.length > 0) {
               const box = resized[0].box;
+
+              // Tambahkan padding agar wajah tidak terlalu terpotong
+              const padding = 20;
+              const x = Math.max(0, box.x - padding);
+              const y = Math.max(0, box.y - padding);
+              const width = Math.min(
+                video.videoWidth - x,
+                box.width + padding * 2
+              );
+              const height = Math.min(
+                video.videoHeight - y,
+                box.height + padding * 2
+              );
+
               const faceCanvas = document.createElement("canvas");
-              faceCanvas.width = box.width;
-              faceCanvas.height = box.height;
+              faceCanvas.width = width;
+              faceCanvas.height = height;
 
               faceCanvas
                 .getContext("2d")
-                .drawImage(
-                  video,
-                  box.x,
-                  box.y,
-                  box.width,
-                  box.height,
-                  0,
-                  0,
-                  box.width,
-                  box.height
-                );
+                .drawImage(video, x, y, width, height, 0, 0, width, height);
 
               const prediction = await model.predict(faceCanvas);
-
               const best = prediction.reduce((a, b) =>
                 a.probability > b.probability ? a : b
               );
 
               if (best.probability > 0.5) {
-                // tampilkan hanya nama di BAWAH kotak deteksi
+                // tampilkan nama di bawah kotak
                 const labelText = best.className;
                 context.font = "16px Arial";
                 context.fillStyle = "rgba(0,0,0,0.6)";
@@ -150,7 +144,6 @@
                 const textWidth = context.measureText(labelText).width;
                 const textHeight = 20;
 
-                // Background hitam transparan di bawah kotak wajah
                 context.fillRect(
                   box.x,
                   box.y + box.height + 4,
@@ -158,12 +151,11 @@
                   textHeight
                 );
 
-                // Teks putih
                 context.fillStyle = "white";
                 context.fillText(labelText, box.x + 4, box.y + box.height + 18);
               }
 
-              // absensi hanya jika belum dicatat
+              // log absensi jika belum dicatat
               if (best.probability > 0.95 && !absensiTercatat[best.className]) {
                 absensiTercatat[best.className] = true;
                 const now = new Date().toLocaleTimeString();
